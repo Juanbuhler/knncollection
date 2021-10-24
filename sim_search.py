@@ -35,31 +35,67 @@ def main():
         knn_labels.append(value[1])
     knn_labels = [''] + list(set(knn_labels))
 
-    knn_predictions = ['']
-    if knn_model.predictions is not None:
-        knn_predictions = [''] + list(set(list(knn_model.predictions)))
-        knn_predictions.sort()
+
 
     st.sidebar.text(str(len(collection.files)) + ' images')
-    st.sidebar.markdown('---')
 
-    similarity = st.sidebar.checkbox('Similarity')
-    image_info = st.sidebar.checkbox('Image Info')
-    preds = st.sidebar.checkbox('Show Predictions')
-    #show_labels = st.sidebar.selectbox('Show Labels', knn_labels)
-    show_labels = st.sidebar.checkbox('Show Labels')
-    show_predictions = st.sidebar.selectbox('Show Predictions', knn_predictions)
-    reverse_predictions = st.sidebar.checkbox('Predictions in increasing order')
-    st.sidebar.markdown('---')
+    general_section = st.sidebar.expander('General Controls')
+    training_section = st.sidebar.expander('Tranining and Grouping Controls')
+    experimental_section = st.sidebar.expander('Experimental Controls')
 
-    label_images = st.sidebar.checkbox('Label Images')
-    labelScope = st.sidebar.selectbox('Label Scope', ['train', 'test'])
+    similarity = general_section.checkbox('Similarity', value=True)
+    image_info = general_section.checkbox('Image Info')
+    preds = general_section.checkbox('Show Predictions')
+    show_labels = general_section.checkbox('Show only Labeled Images')
+
+    show_groups = False
+    show_predictions = ''
+    knn_predictions = ['']
+    if knn_model.predictions is not None:
+        show_groups = training_section.checkbox('Show Groups')
+        if show_groups:
+            group_size = training_section.slider('Group Image Size',
+                                                 min_value=2, max_value=10, value=5)
+        training_section.markdown('---')
+
+        knn_predictions = [''] + list(set(list(knn_model.predictions)))
+        knn_predictions.sort()
+        show_predictions = training_section.selectbox('Show Predictions', knn_predictions)
+        if show_predictions != '':
+            reverse_predictions = training_section.checkbox('Predictions in increasing order')
+        training_section.markdown('---')
+
+    if training_section.button('Add one label'):
+        knn_model.add_one_label(collection.files, collection.hashes)
+
+    label_images = training_section.checkbox('Label Images')
+    if label_images:
+        labelScope = training_section.selectbox('Label Scope', ['train', 'test'])
+
+    training_section.markdown('---')
 
     if 'search' not in st.session_state:
         st.session_state['search'] = None
         search = None
     else:
         search = st.session_state['search']
+
+    if show_groups and knn_model.predictions is not None:
+        n_cols = 5
+        cols = st.columns(n_cols)
+        i_col = 0
+        categories = list(set(list(knn_model.predictions)))
+        categories.sort()
+        for cat in categories:
+            collage = knn_model.get_collage(collection.files, cat,
+                                            group_size, group_size, x_size=1600, y_size=1600)
+            cols[i_col].image(collage)
+            if preds:
+                cols[i_col].text(cat)
+                cols[i_col].markdown('---')
+            i_col += 1
+            if i_col >= n_cols:
+                i_col = 0
 
     if search is None:
         page = 1
@@ -70,6 +106,7 @@ def main():
         if knn_model.predictions is not None:
             display_predictions = knn_model.predictions[page * page_length:(page + 1) * page_length]
             display_confidences = knn_model.confidences[page * page_length:(page + 1) * page_length]
+        experimental_section.write('Similarity vector perturbation controls appear here when a similarity search is active.')
 
     elif 'sim_hash' in search.keys():
         s = collection.similarity_search(search['sim_hash'], num_assets=page_length)
@@ -81,10 +118,9 @@ def main():
         if st.button('Reset Search'):
             st.session_state['search'] = None
             st.experimental_rerun()
-        st.sidebar.markdown('---')
-        n_changes = st.sidebar.slider('Hash changes', min_value=1, max_value=2000, value=1)
-        amp_change = st.sidebar.slider('Change Amplitude', min_value=1, max_value=16, value=1)
-        if st.sidebar.button('Perturb Hash'):
+        n_changes = experimental_section.slider('Hash changes', min_value=1, max_value=2000, value=1)
+        amp_change = experimental_section.slider('Change Amplitude', min_value=1, max_value=32, value=1)
+        if experimental_section.button('Perturb Hash'):
             h = np.copy(search['sim_hash'])
             for i in range(0, n_changes):
                 h[random.randint(0, 2047)] += random.randint(-amp_change, amp_change)
@@ -115,7 +151,6 @@ def main():
         display_hashes = [d_hashes[j] for j in sorter][:page_length]
         display_confidences = [d_confidences[j] for j in sorter][:page_length]
         display_predictions = np.array(knn_model.predictions)[knn_model.predictions == show_predictions][:page_length]
-
 
     n_cols = 5
     cols = st.columns(n_cols)
@@ -157,13 +192,14 @@ def main():
         if i_col >= n_cols:
             i_col = 0
 
-    st.sidebar.markdown('---')
-
-    n_clusters = st.sidebar.slider('Number of Clusters', min_value=5, max_value=100, value=5)
-    if st.sidebar.button('Auto Group'):
+    n_clusters = training_section.slider('Number of Clusters', min_value=5, max_value=500, value=50)
+    if training_section.button('Auto Group'):
         knn_model.auto_label(collection.files, collection.hashes, n_clusters=n_clusters)
+        st.experimental_rerun()
 
-    if st.sidebar.button('Train KNN Model'):
+    training_section.markdown('---')
+
+    if training_section.button('Train KNN Model'):
         knn_model.save_model()
         knn_model.train_apply(collection.hashes)
         st.experimental_rerun()

@@ -1,5 +1,6 @@
 import numpy as np
 import cv2
+from PIL import Image
 import mxnet as mx
 from collections import namedtuple
 import os
@@ -64,10 +65,28 @@ class KnnModel(object):
         closest, _ = pairwise_distances_argmin_min(kmeans.cluster_centers_, cluster_hashes)
 
         for n, i in enumerate(closest):
-            self.label(cluster_files[i], cluster_hashes[i], 'auto'+str(n))
+            self.label(cluster_files[i], cluster_hashes[i], 'auto'+str(n).zfill(3))
         self.save_model()
         self.train_apply(hashes)
 
+    def add_one_label(self, files, hashes):
+        if self.labels == {}:
+            self.label(files[0], hashes[0], 'auto000')
+            self.train_apply(hashes)
+            return
+        elif self.predictions is None:
+            self.train_apply(hashes)
+
+        labels_list = list(set(list(self.predictions)))
+        i = 0
+        new_label = 'auto000'
+        while new_label in labels_list:
+            i += 1
+            new_label = 'auto' + str(i).zfill(3)
+
+        new_id = list(self.confidences).index(min(list(self.confidences)))
+        self.label(files[new_id], hashes[new_id], new_label)
+        self.train_apply(hashes)
 
     def save_model(self):
         print('saving ' + self.name)
@@ -93,6 +112,34 @@ class KnnModel(object):
 
         self.save_model()
 
+    def get_collage(self, files, category, x_ims, y_ims, x_size=1500, y_size=1000):
+        collage = Image.new("RGB", (x_size, y_size))
+
+        if category not in list(self.predictions):
+            return collage
+
+        # Prep our list of files for collage
+        d_files = np.array(files)[self.predictions == category]
+        d_confidences = -np.array(self.confidences)[self.predictions == category]
+
+        sorter = np.argsort(d_confidences)
+        collage_files = [d_files[j] for j in sorter][:x_ims*y_ims]
+
+        x_imsize = int(x_size/x_ims)
+        y_imsize = int(y_size/y_ims)
+        id = 0
+        for i in range(0, x_ims):
+            for j in range(0, y_ims):
+                if id >= len(collage_files):
+                    break
+                img = Image.open(collage_files[id])
+                img = img.resize((x_imsize, y_imsize))
+                collage.paste(img, (j*y_imsize, i*x_imsize))
+                id += 1
+
+
+        return collage
+
 
 class KnnCollection(object):
     def __init__(self, files, save_name='knnCollection'):
@@ -101,6 +148,9 @@ class KnnCollection(object):
         # If there's a pickle file in there, just read it and return
         if os.path.isfile(save_name):
             self.files, self.hashes = pickle.load(open(save_name, 'rb'))
+            #sorter = np.argsort(self.files)
+            #self.files = [self.files[j] for j in sorter]
+            #self.hashes = [self.hashes[j] for j in sorter]
 
             diff = [x for x in files if x not in self.files]
             if not diff:
